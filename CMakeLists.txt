@@ -4,25 +4,42 @@ include($ENV{PICO_SDK_PATH}/pico_sdk_init.cmake)
 pico_sdk_init()
 
 
-project(hello_world C CXX ASM)
+project(pico_tutorials C CXX ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 
-file(GLOB C_SRC
-       ${PROJECT_SOURCE_DIR}/src/*.c)
+file(GLOB C_HELLOWORLD_SRC
+       ${PROJECT_SOURCE_DIR}/src/hello_world/*.c)
 
-file(GLOB CPP_SRC
-       ${PROJECT_SOURCE_DIR}/src/*.cpp)
-
-
-add_executable(${PROJECT_NAME} ${C_SRC} ${CPP_SRC})
+file(GLOB CPP_HELLOWORLD_SRC
+       ${PROJECT_SOURCE_DIR}/src/hello_world/*.cpp)
 
 
+add_executable(hello_world ${C_HELLOWORLD_SRC} ${CPP_HELLOWORLD_SRC})
 
-target_link_libraries(${PROJECT_NAME} pico_stdlib)
+target_link_libraries(hello_world pico_stdlib)
 
-pico_add_extra_outputs(${PROJECT_NAME})
-pico_enable_stdio_usb(${PROJECT_NAME} 1)
+
+
+file(GLOB C_I2C_MPU6050_SRC
+       ${PROJECT_SOURCE_DIR}/src/mpu6050/*.c)
+
+file(GLOB CPP_I2C_MPU6050_SRC
+       ${PROJECT_SOURCE_DIR}/src/mpu6050/*.cpp)
+
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
+add_executable(i2c_mpu6050_read ${C_I2C_MPU6050_SRC} ${CPP_I2C_MPU6050_SRC})
+
+target_link_libraries(i2c_mpu6050_read pico_stdlib hardware_i2c)
+
+
+pico_add_extra_outputs(hello_world)
+pico_enable_stdio_usb(hello_world 1)
+
+
+pico_add_extra_outputs(i2c_mpu6050_read)
+pico_enable_stdio_usb(i2c_mpu6050_read 1)
 
