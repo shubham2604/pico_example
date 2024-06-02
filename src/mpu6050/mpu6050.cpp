@@ -1,7 +1,7 @@
 #include "mpu6050/mpu6050.h"
 
 
-MPU6050::MPU6050() {
+IMU::IMU() {
 	
 
     sleep_ms(2000);
@@ -21,11 +21,17 @@ MPU6050::MPU6050() {
     
     int status;
 
+    soft_iron_scaling << 1.24506622, -0.09939941, -0.04428451,
+                        -0.09939941,  1.20940279,  0.04576971,
+                        -0.04428451,  0.04576971,  1.27723159;
+
+    hard_iron_offset <<  1381.46265332, -3195.81090886,  538.74050546;
+
 }
 
 
 
-void MPU6050::getOffsets() {
+void IMU::getOffsets() {
 	float gyro_off[3]; //Temporary storage
 	float accel_off[3];
 
@@ -47,16 +53,16 @@ void MPU6050::getOffsets() {
 }
 
 
-void MPU6050::getGyroRaw(float *roll, float *pitch, float *yaw) {
+void IMU::getGyroRaw(float *roll, float *pitch, float *yaw) {
 	uint8_t temp_buffer[2];
     
-    this->reg_read(i2c, REG_DEVID, 0x43, temp_buffer, 2); //Read X registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x43, temp_buffer, 2); //Read X registers
     int16_t X = temp_buffer[0] << 8 | temp_buffer[1];    
 
-    this->reg_read(i2c, REG_DEVID, 0x45, temp_buffer, 2); //Read Y registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x45, temp_buffer, 2); //Read Y registers
 	int16_t Y = temp_buffer[0] << 8 | temp_buffer[1];
 	
-    this->reg_read(i2c, REG_DEVID, 0x47, temp_buffer, 2); //Read Z registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x47, temp_buffer, 2); //Read Z registers
 	int16_t Z = temp_buffer[0] << 8 | temp_buffer[1];
 
 	*roll = (float)X; //Roll on X axis
@@ -64,18 +70,34 @@ void MPU6050::getGyroRaw(float *roll, float *pitch, float *yaw) {
 	*yaw = (float)Z; //Yaw on Z axis
 }
 
+void IMU::getMagRaw(float *x, float *y, float *z)
+{
+    uint8_t temp_buffer[6];
+    
+    this->reg_read(i2c, REG_DEVID_QMC5883, 0x00, temp_buffer, 6); //Read X, Z, Y registers at once
 
-void MPU6050::getAccelRaw(float *x, float *y, float *z) {
+    int16_t X = temp_buffer[1] << 8 | temp_buffer[0];    
+	int16_t Y = temp_buffer[3] << 8 | temp_buffer[2];
+	int16_t Z = temp_buffer[5] << 8 | temp_buffer[4];
+
+	*x = (float)X;
+	*y = (float)Y;
+	*z = (float)Z;
+
+    std::cout << *x << " " << *y << " " << *z << std::endl;
+}
+
+void IMU::getAccelRaw(float *x, float *y, float *z) {
 
 	uint8_t temp_buffer[2];
     
-    this->reg_read(i2c, REG_DEVID, 0x3b, temp_buffer, 2); //Read X registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x3b, temp_buffer, 2); //Read X registers
     int16_t X = temp_buffer[0] << 8 | temp_buffer[1];    
 
-    this->reg_read(i2c, REG_DEVID, 0x3d, temp_buffer, 2); //Read Y registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x3d, temp_buffer, 2); //Read Y registers
 	int16_t Y = temp_buffer[0] << 8 | temp_buffer[1];
 	
-    this->reg_read(i2c, REG_DEVID, 0x3f, temp_buffer, 2); //Read Z registers
+    this->reg_read(i2c, REG_DEVID_MPU6050, 0x3f, temp_buffer, 2); //Read Z registers
 	int16_t Z = temp_buffer[0] << 8 | temp_buffer[1];
 
 	*x = (float)X;
@@ -84,7 +106,7 @@ void MPU6050::getAccelRaw(float *x, float *y, float *z) {
 }
 
 
-void MPU6050::getAccel(float *x, float *y, float *z) {
+void IMU::getAccel(float *x, float *y, float *z) {
 	getAccelRaw(x, y, z); //Store raw values into variables
 	*x = round((*x - ax_off) * 1000.0 / ACCEL_SENS) / 1000.0; //Remove the offset and divide by the accelerometer sensetivity (use 1000 and round() to round the value to three decimal places)
 	*y = round((*y - ay_off) * 1000.0 / ACCEL_SENS) / 1000.0;
@@ -92,65 +114,115 @@ void MPU6050::getAccel(float *x, float *y, float *z) {
 }
 
 
-void MPU6050::getGyro(float *roll, float *pitch, float *yaw) {
+void IMU::getGyro(float *roll, float *pitch, float *yaw) {
 	getGyroRaw(roll, pitch, yaw); //Store raw values into variables
 	*roll = round((*roll - gr_off) * 1000.0 / GYRO_SENS) / 1000.0; //Remove the offset and divide by the gyroscope sensetivity (use 1000 and round() to round the value to three decimal places)
 	*pitch = round((*pitch - gp_off) * 1000.0 / GYRO_SENS) / 1000.0;
 	*yaw = round((*yaw - gy_off) * 1000.0 / GYRO_SENS) / 1000.0;
 }
 
+void IMU::getMag(float *x, float *y, float *z)
+{
+
+
+    getMagRaw(x, y, z); //Store raw values into variables
+
+    Eigen::Vector3d temp;
+    temp << *x, *y, *z;
+
+    temp = soft_iron_scaling * (temp - hard_iron_offset);
+    //temp = (temp - hard_iron_offset);
+
+    temp.normalize();
+
+    *x = temp(0);
+    *y = temp(1);
+    *z = temp(2); 
+
+    
+    double headingRad = atan2(*x, *y) ;
+    
+    std::cout << "Heading is " << headingRad * 180/M_PI<< std::endl;
+    
+}
 
 /*******************************************************************************
  * Function Definitions
  */
 
-void MPU6050::initialize() {
+void IMU::initialize_hmc5883() {
+    uint8_t temp;
+
+    printf("Define set/reset period \n");
+    temp = 0x01;
+    this->reg_write(i2c, REG_DEVID_QMC5883, 0x0B, &temp, 1); //Define set/reset period
+
+    printf("Define OSR = 512, Full Scale Range = 2 Gauss, ODR = 200Hz, set continuous measurement mode \n");
+    temp = 0x0D;
+    this->reg_write(i2c, REG_DEVID_QMC5883, 0x09, &temp, 1); //Define OSR = 512, Full Scale Range = 8 Gauss, ODR = 200Hz, set continuous measurement mode
+
+    // printf("write 0 to mode register \n");
+    // temp = 0b00000000;
+    // this->reg_write(i2c, REG_DEVID_QMC5883, 0x02, &temp, 1); //write 0 to mode register
+
+    
+    this->reg_read(i2c, REG_DEVID_QMC5883, 0x0D, &temp, 1); //Read ID reg A
+    printf("read Chip ID : %d\n", temp);
+
+    // this->reg_read(i2c, REG_DEVID_QMC5883, 0x0B, &temp, 1); //Read ID reg B
+    // printf("read identification register B : %d\n", temp);
+
+    // this->reg_read(i2c, REG_DEVID_QMC5883, 0x0C, &temp, 1); //Read ID reg C
+    // printf("read identification register C : %d\n", temp);
+}
+
+void IMU::initialize_mpu6050() {
         
     uint8_t temp;
     
     printf("Take MPU6050 out of sleep mode \n");
     temp = 0b00000000;
-    this->reg_write(i2c, REG_DEVID, 0x6b, &temp, 1); //Take MPU6050 out of sleep mode - see Register Map
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x6b, &temp, 1); //Take MPU6050 out of sleep mode - see Register Map
     
     printf("Set DLPF (low pass filter) to 44Hz (so no noise above 44Hz will pass through \n");
     temp = 0b00000011;
-    this->reg_write(i2c, REG_DEVID, 0x1a, &temp, 1); //Set DLPF (low pass filter) to 44Hz (so no noise above 44Hz will pass through)
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x1a, &temp, 1); //Set DLPF (low pass filter) to 44Hz (so no noise above 44Hz will pass through)
 
     printf("Set sample rate divider (to 200Hz) \n");	
     temp = 0b00000100;
-    this->reg_write(i2c, REG_DEVID, 0x19, &temp, 1); //Set sample rate divider (to 200Hz) - see Register Map
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x19, &temp, 1); //Set sample rate divider (to 200Hz) - see Register Map
 	
     printf("Configure gyroscope settings \n");
     temp = GYRO_CONFIG;
-    this->reg_write(i2c, REG_DEVID, 0x1b, &temp, 1); //Configure gyroscope settings - see Register Map (see MPU6050.h for the GYRO_CONFIG parameter)
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x1b, &temp, 1); //Configure gyroscope settings - see Register Map (see MPU6050.h for the GYRO_CONFIG parameter)
 	
     printf("Configure accelerometer settings \n");
     temp = ACCEL_CONFIG;
-    this->reg_write(i2c, REG_DEVID, 0x1c, &temp, 1); //Configure accelerometer settings - see Register Map (see MPU6050.h for the GYRO_CONFIG parameter)
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x1c, &temp, 1); //Configure accelerometer settings - see Register Map (see MPU6050.h for the GYRO_CONFIG parameter)
 
     printf("Set offsets to zero \n");
 	//Set offsets to zero
 	temp = 0b00000000;
-    this->reg_write(i2c, REG_DEVID, 0x06, &temp, 1);
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x06, &temp, 1);
     
-    this->reg_write(i2c, REG_DEVID, 0x07, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x07, &temp, 1); 
     
-    this->reg_write(i2c, REG_DEVID, 0x08, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x08, &temp, 1); 
     
-    this->reg_write(i2c, REG_DEVID, 0x09, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x09, &temp, 1); 
     
-    this->reg_write(i2c, REG_DEVID, 0x0A, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x0A, &temp, 1); 
     
-    this->reg_write(i2c, REG_DEVID, 0x0B, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x0B, &temp, 1); 
     
     temp = 0b10000001;
-    this->reg_write(i2c, REG_DEVID, 0x00, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x00, &temp, 1); 
     
     temp = 0b00000001;
-    this->reg_write(i2c, REG_DEVID, 0x01, &temp, 1); 
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x01, &temp, 1); 
     
     temp = 0b10000001;
-    this->reg_write(i2c, REG_DEVID, 0x02, &temp, 1);
+    this->reg_write(i2c, REG_DEVID_MPU6050, 0x02, &temp, 1);
 
     
     printf("Getting offsets \n");
@@ -159,7 +231,7 @@ void MPU6050::initialize() {
 
 
 // Write 1 byte to the specified register
-int MPU6050::reg_write(  i2c_inst_t *i2c, 
+int IMU::reg_write(  i2c_inst_t *i2c, 
                 const uint addr, 
                 const uint8_t reg, 
                 uint8_t *buf,
@@ -190,7 +262,7 @@ int MPU6050::reg_write(  i2c_inst_t *i2c,
 
 // Read byte(s) from specified register. If nbytes > 1, read from consecutive
 // registers.
-int MPU6050::reg_read(  i2c_inst_t *i2c,
+int IMU::reg_read(  i2c_inst_t *i2c,
                 const uint addr,
                 const uint8_t reg,
                 uint8_t *buf,
@@ -223,11 +295,12 @@ int main() {
         sleep_ms(1000);
     }
     
-    MPU6050 imu;
+    IMU imu;
     
     printf("Reaching here before init mpu \n");
 
-    imu.initialize();
+    imu.initialize_mpu6050();
+    imu.initialize_hmc5883();
     
     printf("Reaching here after init mpu \n");
 
@@ -238,14 +311,20 @@ int main() {
     float acc_x_f;
     float acc_y_f;
     float acc_z_f;
+    float mag_x_f;
+    float mag_y_f;
+    float mag_z_f;
+
 
     float roll, pitch;
     float g;
     // Loop forever
     while (true) {
 
+        imu.getMag(&mag_x_f, &mag_y_f, &mag_z_f);
         imu.getAccel(&acc_x_f, &acc_y_f, &acc_z_f);
         imu.getGyro(&gyro_x_f, &gyro_y_f, &gyro_z_f);
+
 
         g = sqrt(acc_x_f*acc_x_f + acc_y_f*acc_y_f + acc_z_f*acc_z_f);
 
@@ -255,7 +334,10 @@ int main() {
         // Print results
         //printf("X_A: %.2f | Y_A: %.2f | Z_A: %.2f\n", acc_x_f, acc_y_f, acc_z_f);
         //printf("X_G: %.2f | Y_G: %.2f | Z_G: %.2f\r\n", gyro_x_f, gyro_y_f, gyro_z_f);
-        printf("Roll angle: %.2f , Pitch angle: %.2f\n", roll, pitch);
+        //printf("X_M: %.2f | Y_M: %.2f | Z_M: %.2f\r\n", mag_x_f, mag_y_f, mag_z_f);    
+        //printf("%.2f %.2f %.2f\n", mag_x_f, mag_y_f, mag_z_f);    
+
+//        printf("Roll angle: %.2f , Pitch angle: %.2f\n", roll, pitch);
         
         sleep_ms(100);
     }
